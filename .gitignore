@@ -1,0 +1,40 @@
+# Virtual environment
+venv/
+env/
+.venv/
+ 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+ 
+# Raw/intermediate data files (large, regenerable by re-running the scraper)
+data/letterboxd_reviews.csv
+data/reviews_labeled.csv
+data/sentences_labeled.csv
+data/discovered_topics.csv
+data/aspect_sentiment_final.csv
+data/lora_checkpoints/
+ 
+# Trained models are intentionally NOT ignored - keeping these tracked:
+#   data/lora_sentiment_model/
+#   data/bertopic_model/
+#   data/baseline_model.joblib
+#   data/tfidf_vectorizer.joblib
+ 
+# Environment variables / secrets
+.env
+.env.local
+ 
+# VS Code settings (optional - some teams do commit shared settings)
+.vscode/
+ 
+# OS junk files
+.DS_Store
+Thumbs.db
+ 
+# Jupyter checkpoints (if you use notebooks alongside this)
+.ipynb_checkpoints/
+ 
+# Streamlit local cache
+.streamlit/
