@@ -35,7 +35,7 @@ INPUT_CSV = "../data/reviews_labeled.csv"
 BASE_MODEL = "distilbert-base-uncased"
 OUTPUT_DIR = "../data/lora_sentiment_model"
  
-LABEL2ID = {"negative": 0, "neutral": 1, "positive": 2}
+LABEL2ID = {"negative": 0, "positive": 1}  # binary - this dataset has no neutral class
 ID2LABEL = {v: k for k, v in LABEL2ID.items()}
  
  
@@ -74,7 +74,7 @@ def main():
  
     base_model = AutoModelForSequenceClassification.from_pretrained(
         BASE_MODEL,
-        num_labels=3,
+        num_labels=2,
         id2label=ID2LABEL,
         label2id=LABEL2ID,
     )
