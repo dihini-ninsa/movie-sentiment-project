@@ -1,20 +1,27 @@
 """
-Step 2: Preprocessing & Sentiment Labeling
---------------------------------------------
-Takes the raw scraped CSV and produces two outputs:
+Step 2: Preprocessing & Sentiment Labeling (Kaggle IMDB 50K version)
+------------------------------------------------------------------------
+Adjusted for the Kaggle "IMDB Dataset of 50K Movie Reviews" CSV, which has
+only two columns: `review` and `sentiment` (positive/negative - no star
+rating, no film title, no neutral class).
  
-1. reviews_labeled.csv      -> one row per review, with a sentiment label
-2. sentences_labeled.csv    -> one row per sentence (needed later for BERTopic
-                                aspect extraction, since aspects live at
-                                sentence level, not whole-review level)
+Download from:
+    https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews
+Place the file as: ../data/IMDB Dataset.csv
  
-Sentiment labeling logic:
-- Convert star rating (0.5 - 5.0) into a "rating-based" sentiment
-- Run VADER on the review text for a "text-based" sentiment
-- Combine both: if they agree, use that label. If they disagree, trust the
-  rating (since it's ground truth from the user) but flag it in a column
-  so you can inspect mismatches later (useful for your project write-up,
-  e.g. "X% of reviews had sarcasm/mismatch between rating and text sentiment")
+Outputs:
+1. reviews_labeled.csv      -> one row per review, with sentiment label
+2. sentences_labeled.csv    -> one row per sentence (for BERTopic later)
+ 
+Sentiment labeling logic (adjusted):
+- The dataset's own `sentiment` column is the ground truth label (already
+  positive/negative - no need to derive it from a star rating).
+- VADER is still run as a cross-check against that label. Cases where they
+  disagree are flagged - these are your likely sarcasm/nuance cases, same
+  idea as the "rating vs VADER mismatch" logic from the original plan.
+- Note: since there's no film identity in this dataset, there's no
+  `film_slug` column anymore. The Step 6b film-level dashboard won't apply
+  to this dataset version - only single-review analysis will work.
  
 Run:
     python preprocess.py
@@ -32,7 +39,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 nltk.download("punkt", quiet=True)
 nltk.download("punkt_tab", quiet=True)  # needed for newer nltk versions
  
-INPUT_CSV = "../data/letterboxd_reviews.csv"
+INPUT_CSV = "../data/IMDB Dataset.csv"
 OUTPUT_REVIEWS_CSV = "../data/reviews_labeled.csv"
 OUTPUT_SENTENCES_CSV = "../data/sentences_labeled.csv"
  
@@ -46,27 +53,16 @@ analyzer = SentimentIntensityAnalyzer()
 def clean_text(text):
     if not isinstance(text, str):
         return ""
-    text = re.sub(r"http\S+|www\.\S+", "", text)      # remove URLs
-    text = re.sub(r"\s+", " ", text)                    # collapse whitespace
+    text = re.sub(r"<br\s*/?>", " ", text)              # this dataset has literal <br /> tags
+    text = re.sub(r"http\S+|www\.\S+", "", text)          # remove URLs
+    text = re.sub(r"\s+", " ", text)                        # collapse whitespace
     text = text.strip()
     return text
  
  
 # ---------------------------------------------------------------------------
-# Sentiment labeling
+# Sentiment cross-check
 # ---------------------------------------------------------------------------
- 
-def rating_to_sentiment(rating):
-    """Letterboxd ratings run 0.5 - 5.0 in half-star steps."""
-    if rating is None or pd.isna(rating):
-        return None
-    if rating >= 3.5:
-        return "positive"
-    elif rating <= 2.5:
-        return "negative"
-    else:
-        return "neutral"
- 
  
 def vader_to_sentiment(text):
     scores = analyzer.polarity_scores(text)
@@ -76,19 +72,7 @@ def vader_to_sentiment(text):
     elif compound <= -0.05:
         return "negative"
     else:
-        return "neutral"
- 
- 
-def combine_labels(rating_label, vader_label):
-    """
-    Trust the star rating as ground truth (it's the user's explicit signal).
-    VADER is used as a cross-check -> mismatches are flagged, not overridden.
-    If rating is missing, fall back to VADER.
-    """
-    if rating_label is None:
-        return vader_label, False
-    mismatch = rating_label != vader_label
-    return rating_label, mismatch
+        return "neutral"  # VADER can output neutral even though ground truth is binary
  
  
 # ---------------------------------------------------------------------------
@@ -98,29 +82,23 @@ def combine_labels(rating_label, vader_label):
 def main():
     df = pd.read_csv(INPUT_CSV)
     print(f"Loaded {len(df)} raw reviews")
+    print("Columns found:", list(df.columns))
  
+    df = df.rename(columns={"review": "review_text", "sentiment": "label_sentiment"})
     df["review_text"] = df["review_text"].apply(clean_text)
     df = df[df["review_text"].str.len() > 10].reset_index(drop=True)
     print(f"{len(df)} reviews remain after removing empty/very short entries")
  
     df["review_id"] = df.index  # stable id used to link sentences back later
  
-    rating_labels = df["rating"].apply(rating_to_sentiment)
-    vader_labels = df["review_text"].apply(vader_to_sentiment)
+    df["vader_label"] = df["review_text"].apply(vader_to_sentiment)
  
-    final_labels = []
-    mismatches = []
-    for r_label, v_label in zip(rating_labels, vader_labels):
-        label, mismatch = combine_labels(r_label, v_label)
-        final_labels.append(label)
-        mismatches.append(mismatch)
+    # Ground truth is the dataset's own label - VADER is just a cross-check
+    df["sentiment"] = df["label_sentiment"]
+    df["mismatch"] = df["sentiment"] != df["vader_label"]
  
-    df["vader_label"] = vader_labels
-    df["sentiment"] = final_labels
-    df["rating_vader_mismatch"] = mismatches
- 
-    mismatch_pct = df["rating_vader_mismatch"].mean() * 100
-    print(f"Rating/VADER mismatch rate: {mismatch_pct:.1f}% "
+    mismatch_pct = df["mismatch"].mean() * 100
+    print(f"Label/VADER mismatch rate: {mismatch_pct:.1f}% "
           f"(these are your likely sarcasm/nuance cases)")
  
     print("\nSentiment distribution:")
@@ -141,7 +119,6 @@ def main():
                 continue
             sentence_rows.append({
                 "review_id": row["review_id"],
-                "film_slug": row["film_slug"],
                 "sentence": sent,
                 "review_sentiment": row["sentiment"],  # useful as a weak prior
             })
