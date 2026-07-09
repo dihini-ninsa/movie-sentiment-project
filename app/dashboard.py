@@ -3,7 +3,9 @@ Step 6b: Streamlit Dashboard
 ---------------------------------
 Interactive frontend for the project. Two modes:
     1. Single review analysis - paste a review, see aspect/sentiment breakdown
-    2. Film-level dashboard - pick a film, see aggregated aspect sentiment
+    2. Overall Aspect Summary - see aggregated aspect sentiment across the
+       whole dataset (this dataset has no per-film identity, so this is a
+       dataset-wide view rather than a per-film one)
  
 Run:
     streamlit run dashboard.py
@@ -22,7 +24,7 @@ API_URL = "http://127.0.0.1:8000"
 st.set_page_config(page_title="Movie Review Aspect Sentiment", layout="wide")
 st.title("🎬 Movie Review Aspect-Based Sentiment Analysis")
  
-mode = st.sidebar.radio("Choose a mode:", ["Single Review Analysis", "Film Dashboard"])
+mode = st.sidebar.radio("Choose a mode:", ["Single Review Analysis", "Overall Aspect Summary"])
  
 # ---------------------------------------------------------------------------
 # Mode 1: Single review analysis
@@ -73,42 +75,40 @@ if mode == "Single Review Analysis":
                 st.error(f"Something went wrong: {e}")
  
 # ---------------------------------------------------------------------------
-# Mode 2: Film-level dashboard
+# Mode 2: Overall aspect summary (dataset-wide - no per-film breakdown,
+# since this dataset has no film identity column)
 # ---------------------------------------------------------------------------
 else:
-    st.subheader("Film-level aspect sentiment summary")
- 
-    film_slug = st.text_input(
-        "Enter a film slug (e.g. 'oppenheimer', matching your scraped data):"
+    st.subheader("Overall aspect sentiment summary")
+    st.caption(
+        "This dataset (Kaggle IMDB 50K) has no per-film identity, so this shows "
+        "aggregated aspect sentiment across all reviews rather than per-film."
     )
  
-    if st.button("Load Film Summary"):
-        if not film_slug.strip():
-            st.warning("Please enter a film slug.")
-        else:
-            try:
-                response = requests.get(f"{API_URL}/film/{film_slug}", timeout=10)
-                response.raise_for_status()
-                data = response.json()
+    if st.button("Load Summary"):
+        try:
+            response = requests.get(f"{API_URL}/aspects/summary", timeout=10)
+            response.raise_for_status()
+            data = response.json()
  
-                counts = data["aspect_sentiment_counts"]
-                df = pd.DataFrame(counts).T.fillna(0)
+            counts = data["aspect_sentiment_counts"]
+            df = pd.DataFrame(counts).T.fillna(0)
  
-                st.markdown(f"### Aspect breakdown for `{film_slug}`")
-                st.dataframe(df, use_container_width=True)
+            st.markdown(f"### Aspect breakdown across {data['total_sentences']:,} sentences")
+            st.dataframe(df, use_container_width=True)
  
-                fig, ax = plt.subplots(figsize=(8, 5))
-                df.plot(kind="bar", stacked=True, ax=ax)
-                ax.set_ylabel("Number of sentences")
-                ax.set_xlabel("Aspect")
-                ax.set_title(f"Aspect Sentiment Breakdown: {film_slug}")
-                plt.xticks(rotation=45, ha="right")
-                st.pyplot(fig)
+            fig, ax = plt.subplots(figsize=(8, 5))
+            df.plot(kind="bar", stacked=True, ax=ax)
+            ax.set_ylabel("Number of sentences")
+            ax.set_xlabel("Aspect")
+            ax.set_title("Aspect Sentiment Breakdown (Overall)")
+            plt.xticks(rotation=45, ha="right")
+            st.pyplot(fig)
  
-            except requests.exceptions.ConnectionError:
-                st.error(
-                    "Could not reach the API. Make sure it's running: "
-                    "`uvicorn api:app --reload`"
-                )
-            except Exception as e:
-                st.error(f"Something went wrong: {e}")
+        except requests.exceptions.ConnectionError:
+            st.error(
+                "Could not reach the API. Make sure it's running: "
+                "`uvicorn api:app --reload`"
+            )
+        except Exception as e:
+            st.error(f"Something went wrong: {e}")
