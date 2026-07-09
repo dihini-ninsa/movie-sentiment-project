@@ -23,6 +23,7 @@ import pandas as pd
 import joblib
 from bertopic import BERTopic
 from sentence_transformers import SentenceTransformer
+from umap import UMAP
  
 INPUT_SENTENCES_CSV = "../data/sentences_labeled.csv"
  
@@ -47,7 +48,18 @@ def discover_topics(sentences):
     embeddings = embedder.encode(sentences, show_progress_bar=True)
  
     print("Running BERTopic clustering...")
+    # random_state is set on UMAP so topic numbers stay stable across runs -
+    # without this, re-running produces a DIFFERENT topic numbering each time,
+    # which silently breaks any TOPIC_TO_ASPECT mapping written for a prior run.
+    umap_model = UMAP(
+        n_neighbors=15,
+        n_components=5,
+        min_dist=0.0,
+        metric="cosine",
+        random_state=42,
+    )
     topic_model = BERTopic(
+        umap_model=umap_model,
         min_topic_size=30,     # smaller = more granular topics, more noise
         calculate_probabilities=False,
         verbose=True,
@@ -86,7 +98,16 @@ def print_topic_summary(topic_model, top_n=25):
 # }
 # ---------------------------------------------------------------------------
 TOPIC_TO_ASPECT = {
-    # fill this in after inspecting your printed topic list
+    0: "Acting",              # her, she, shes, actress
+    4: "Acting",              # acting, cast, actors, supporting
+    1: "Comedy/Humor",        # funny, comedy, laugh, jokes
+    2: "Music/Score",         # music, soundtrack, song, songs
+    5: "Plot/Story",          # plot, story, stories, plots
+    9: "Ending",              # ending, end, twist, climax
+    11: "Characters",         # characters, character, are, were
+    12: "Visual Effects/Cinematography",  # effects, animation, camera, special
+    15: "Dialogue/Writing",   # script, acting, bad, scripts
+    17: "Pacing",             # minutes, slow, hours, short
 }
  
  
