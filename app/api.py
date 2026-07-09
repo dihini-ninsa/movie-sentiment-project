@@ -5,9 +5,9 @@ Serves the sentiment + aspect analysis as a REST API.
  
 Endpoints:
     POST /analyze         -> analyze a single review, return aspect/sentiment breakdown
-    GET  /film/{slug}      -> return aggregated aspect sentiment stats for a film
-                              (reads from the aspect_sentiment_final.csv you generated
-                              in Step 5)
+    GET  /aspects/summary  -> return aggregated aspect sentiment stats across
+                              the whole dataset (no per-film breakdown - this
+                              dataset has no film identity, see preprocess.py notes)
  
 Run:
     uvicorn api:app --reload
@@ -95,8 +95,8 @@ def analyze_review(payload: ReviewRequest):
     return ReviewResponse(overall_sentiment=overall_sentiment, breakdown=breakdown)
  
  
-@app.get("/film/{slug}")
-def film_aspect_summary(slug: str):
+@app.get("/aspects/summary")
+def aspects_summary():
     try:
         df = pd.read_csv(FINAL_DATA_PATH)
     except FileNotFoundError:
@@ -105,17 +105,13 @@ def film_aspect_summary(slug: str):
             detail="Aspect data not found - run aspect_bertopic.py first",
         )
  
-    film_df = df[df["film_slug"] == slug]
-    if film_df.empty:
-        raise HTTPException(status_code=404, detail=f"No data found for film '{slug}'")
- 
     summary = (
-        film_df.groupby(["aspect", "sentence_sentiment"])
+        df.groupby(["aspect", "sentence_sentiment"])
         .size()
         .unstack(fill_value=0)
         .to_dict(orient="index")
     )
-    return {"film_slug": slug, "aspect_sentiment_counts": summary}
+    return {"total_sentences": len(df), "aspect_sentiment_counts": summary}
  
  
 @app.get("/")
