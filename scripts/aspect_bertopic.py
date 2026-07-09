@@ -25,6 +25,10 @@ from bertopic import BERTopic
 from sentence_transformers import SentenceTransformer
  
 INPUT_SENTENCES_CSV = "../data/sentences_labeled.csv"
+ 
+# Set to a number (e.g. 50000) to test on a subset first - much faster.
+# Set to None to run on the full dataset (612k sentences - will take a while on CPU).
+SAMPLE_SIZE = 50000
 OUTPUT_TOPICS_CSV = "../data/discovered_topics.csv"
 OUTPUT_FINAL_CSV = "../data/aspect_sentiment_final.csv"
 BERTOPIC_MODEL_DIR = "../data/bertopic_model"
@@ -99,6 +103,12 @@ def apply_sentiment(sentences_df):
 def main():
     df = pd.read_csv(INPUT_SENTENCES_CSV)
     df = df.dropna(subset=["sentence"])
+ 
+    if SAMPLE_SIZE is not None and len(df) > SAMPLE_SIZE:
+        df = df.sample(n=SAMPLE_SIZE, random_state=42).reset_index(drop=True)
+        print(f"Using a random sample of {SAMPLE_SIZE} sentences "
+              f"(set SAMPLE_SIZE = None at the top to run on the full dataset)")
+ 
     sentences = df["sentence"].tolist()
  
     topic_model, topics = discover_topics(sentences)
