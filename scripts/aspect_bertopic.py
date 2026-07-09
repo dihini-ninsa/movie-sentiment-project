@@ -124,7 +124,7 @@ def main():
     print("\nApplying sentiment model to each sentence...")
     df = apply_sentiment(df)
  
-    final_cols = ["review_id", "film_slug", "sentence", "aspect", "sentence_sentiment"]
+    final_cols = ["review_id", "sentence", "aspect", "sentence_sentiment"]
     df[final_cols].to_csv(OUTPUT_FINAL_CSV, index=False)
     print(f"\nSaved final aspect+sentiment table to {OUTPUT_FINAL_CSV}")
  
