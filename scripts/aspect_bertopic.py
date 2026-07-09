@@ -104,7 +104,7 @@ def print_topic_summary(topic_model, top_n=25):
     return info
  
  
-def auto_map_topics(topic_model, min_overlap=1):
+def auto_map_topics(topic_model, min_overlap=2):
     """
     Matches each discovered topic to an aspect by keyword overlap, instead
     of relying on topic ID numbers (which can shift between runs).
