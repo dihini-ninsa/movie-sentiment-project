@@ -8,12 +8,16 @@ directly from the sentence data.
 Pipeline:
 1. Embed every sentence with a sentence-transformer model
 2. Cluster embeddings with BERTopic (UMAP + HDBSCAN under the hood)
-3. Inspect discovered topics, manually map raw topic IDs -> clean aspect
-   names (this step needs a human - BERTopic gives you clusters + keywords,
-   you decide what to call them and which to merge)
+3. Auto-map each discovered topic to a clean aspect name by matching its
+   top keywords against ASPECT_KEYWORDS below. This is deliberately NOT
+   based on topic ID numbers - BERTopic's topic numbering can shift
+   slightly between runs (UMAP/HDBSCAN have residual non-determinism even
+   with a fixed random_state under multi-threaded execution), so matching
+   on keyword content instead of topic ID makes the mapping stable across
+   runs, sample sizes, and even after upgrading the umap/bertopic packages.
 4. Run sentiment on each individual sentence (reusing the LoRA model or the
    baseline model) to get per-sentence sentiment
-5. Save a final (film, aspect, sentiment) table for the dashboard
+5. Save a final (aspect, sentiment) table for the dashboard
  
 Run:
     python aspect_bertopic.py
@@ -39,6 +43,33 @@ BERTOPIC_MODEL_DIR = "../data/bertopic_model"
 BASELINE_MODEL_PATH = "../data/baseline_model.joblib"
 VECTORIZER_PATH = "../data/tfidf_vectorizer.joblib"
  
+# ---------------------------------------------------------------------------
+# Aspect keyword sets, built from what showed up in real discovered topics
+# across multiple runs. A topic gets matched to whichever aspect its top
+# keywords overlap with most. Topics with no meaningful overlap (genre
+# clusters like "horror"/"bollywood", filler like "oh yeah", DVD/rating
+# mentions, etc.) are correctly left unmapped and dropped.
+# ---------------------------------------------------------------------------
+ASPECT_KEYWORDS = {
+    "Acting": {"acting", "actor", "actress", "actors", "cast", "performance",
+               "performances", "role", "supporting", "hes", "shes"},
+    "Comedy/Humor": {"funny", "comedy", "laugh", "laughed", "laughing",
+                      "jokes", "joke", "humor", "humour", "hilarious"},
+    "Music/Score": {"music", "soundtrack", "song", "songs", "score",
+                     "musical", "dance", "dancing", "sound"},
+    "Plot/Story": {"plot", "story", "stories", "storyline", "plots",
+                    "subplots", "narrative", "holes"},
+    "Ending": {"ending", "end", "ends", "twist", "climax", "finale"},
+    "Characters": {"characters", "character", "believable"},
+    "Visual Effects/Cinematography": {"effects", "animation", "camera",
+                                        "special", "cgi", "cinematography",
+                                        "shots", "shot", "photography", "visual"},
+    "Dialogue/Writing": {"script", "scripts", "dialogue", "written", "writing",
+                          "direction"},
+    "Pacing": {"minutes", "slow", "hours", "hour", "short", "long", "fast",
+               "pace", "pacing", "length"},
+}
+ 
  
 def discover_topics(sentences):
     print("Loading sentence embedding model (all-MiniLM-L6-v2)...")
@@ -48,9 +79,6 @@ def discover_topics(sentences):
     embeddings = embedder.encode(sentences, show_progress_bar=True)
  
     print("Running BERTopic clustering...")
-    # random_state is set on UMAP so topic numbers stay stable across runs -
-    # without this, re-running produces a DIFFERENT topic numbering each time,
-    # which silently breaks any TOPIC_TO_ASPECT mapping written for a prior run.
     umap_model = UMAP(
         n_neighbors=15,
         n_components=5,
@@ -70,45 +98,44 @@ def discover_topics(sentences):
  
  
 def print_topic_summary(topic_model, top_n=25):
-    """
-    Prints the discovered topics with their top keywords so you can manually
-    decide which raw topic IDs correspond to which clean aspect names.
-    """
     info = topic_model.get_topic_info()
     print("\nDiscovered topics (excluding -1 = outliers/noise):")
     print(info[info["Topic"] != -1].head(top_n).to_string(index=False))
     return info
  
  
-# ---------------------------------------------------------------------------
-# MANUAL STEP: after running once and inspecting printed topics, fill this
-# mapping in based on what you see, then re-run with SKIP_DISCOVERY = True
-# to skip re-clustering and just apply your mapping.
-#
-# Example (topic IDs will differ for your actual data):
-# TOPIC_TO_ASPECT = {
-#     0: "Acting",
-#     1: "Plot/Story",
-#     2: "Cinematography",
-#     3: "Pacing",
-#     4: "Music/Score",
-#     5: "Ending",
-#     6: "Direction",
-#     7: "Dialogue/Writing",
-# }
-# ---------------------------------------------------------------------------
-TOPIC_TO_ASPECT = {
-    0: "Acting",              # her, she, shes, actress
-    4: "Acting",              # acting, cast, actors, supporting
-    1: "Comedy/Humor",        # funny, comedy, laugh, jokes
-    2: "Music/Score",         # music, soundtrack, song, songs
-    5: "Plot/Story",          # plot, story, stories, plots
-    9: "Ending",              # ending, end, twist, climax
-    11: "Characters",         # characters, character, are, were
-    12: "Visual Effects/Cinematography",  # effects, animation, camera, special
-    15: "Dialogue/Writing",   # script, acting, bad, scripts
-    17: "Pacing",             # minutes, slow, hours, short
-}
+def auto_map_topics(topic_model, min_overlap=1):
+    """
+    Matches each discovered topic to an aspect by keyword overlap, instead
+    of relying on topic ID numbers (which can shift between runs).
+    Returns a dict {topic_id: aspect_name}, and prints the mapping so you
+    can eyeball it before it's applied.
+    """
+    mapping = {}
+    topic_info = topic_model.get_topic_info()
+ 
+    print("\nAuto-mapped topics -> aspects (keyword-based, not ID-based):")
+    for topic_id in topic_info["Topic"]:
+        if topic_id == -1:
+            continue
+ 
+        topic_words = {word for word, _ in topic_model.get_topic(topic_id)}
+ 
+        best_aspect, best_overlap = None, 0
+        for aspect, aspect_keywords in ASPECT_KEYWORDS.items():
+            overlap = len(topic_words & aspect_keywords)
+            if overlap > best_overlap:
+                best_aspect, best_overlap = aspect, overlap
+ 
+        if best_overlap >= min_overlap:
+            mapping[topic_id] = best_aspect
+            print(f"  Topic {topic_id} -> {best_aspect}  "
+                  f"(matched on: {sorted(topic_words & ASPECT_KEYWORDS[best_aspect])})")
+        else:
+            print(f"  Topic {topic_id} -> [unmapped/dropped]  "
+                  f"(top words: {sorted(topic_words)[:5]})")
+ 
+    return mapping
  
  
 def apply_sentiment(sentences_df):
@@ -138,18 +165,13 @@ def main():
     topic_info = print_topic_summary(topic_model)
     topic_info.to_csv(OUTPUT_TOPICS_CSV, index=False)
     print(f"\nSaved full topic list to {OUTPUT_TOPICS_CSV}")
-    print("\n--> Open that CSV, inspect the keywords per topic, then fill in "
-          "TOPIC_TO_ASPECT at the top of this script with your own labels.")
  
     topic_model.save(BERTOPIC_MODEL_DIR, serialization="safetensors")
     print(f"Saved BERTopic model to {BERTOPIC_MODEL_DIR}")
  
-    if not TOPIC_TO_ASPECT:
-        print("\nTOPIC_TO_ASPECT is empty - stopping here so you can fill it "
-              "in based on the printed topics. Re-run after editing.")
-        return
+    topic_to_aspect = auto_map_topics(topic_model)
  
-    df["aspect"] = df["topic_id"].map(TOPIC_TO_ASPECT)
+    df["aspect"] = df["topic_id"].map(topic_to_aspect)
     df = df.dropna(subset=["aspect"])  # drops sentences in unmapped/noise topics
  
     print("\nApplying sentiment model to each sentence...")
